@@ -25,6 +25,8 @@ import com.techayan.pdftools.ui.dashboard.DashboardToolAction
 import com.techayan.pdftools.ui.dashboard.DashboardViewModel
 import com.techayan.pdftools.ui.features.FeatureDestination
 import com.techayan.pdftools.ui.features.FeatureEmptyStateScreen
+import com.techayan.pdftools.ui.imagetopdf.ImageToPdfScreen
+import com.techayan.pdftools.ui.imagetopdf.ImageToPdfViewModel
 import com.techayan.pdftools.ui.legal.PrivacyPolicyScreen
 import com.techayan.pdftools.ui.legal.TermsConditionsScreen
 import com.techayan.pdftools.ui.recent.RecentFilesScreen
@@ -120,9 +122,8 @@ fun TechayanNavHost(
             }
 
             composable(AppDestination.ImageToPdf.route) {
-                FeatureEmptyStateScreen(
-                    feature = FeatureDestination.fromAction(DashboardToolAction.ImageToPdf)
-                )
+                val viewModel: ImageToPdfViewModel = viewModel()
+                ImageToPdfScreen(viewModel = viewModel)
             }
 
             composable(AppDestination.PdfMerge.route) {
