@@ -1,4 +1,4 @@
-package com.example.techayan
+package com.techayan.pdftools
 
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -19,6 +19,6 @@ class ExampleInstrumentedTest {
     fun useAppContext() {
         // Context of the app under test.
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-        assertEquals("com.example.techayan", appContext.packageName)
+        assertEquals("com.techayan.pdftools", appContext.packageName)
     }
 }

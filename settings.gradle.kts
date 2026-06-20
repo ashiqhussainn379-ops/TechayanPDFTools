@@ -15,5 +15,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Techayan"
+rootProject.name = "Techayan PDF Tools"
 include(":app")
