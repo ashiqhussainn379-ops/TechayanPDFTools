@@ -27,6 +27,8 @@ import com.techayan.pdftools.ui.about.AboutScreen
 import com.techayan.pdftools.ui.dashboard.DashboardScreen
 import com.techayan.pdftools.ui.dashboard.DashboardToolAction
 import com.techayan.pdftools.ui.dashboard.DashboardViewModel
+import com.techayan.pdftools.ui.imagetopdf.ImageToPdfScreen
+import com.techayan.pdftools.ui.imagetopdf.ImageToPdfViewModel
 import com.techayan.pdftools.ui.legal.PrivacyPolicyScreen
 import com.techayan.pdftools.ui.legal.TermsConditionsScreen
 import com.techayan.pdftools.ui.recent.RecentFilesScreen
@@ -123,6 +125,10 @@ fun TechayanNavHost(
                     viewModel = viewModel,
                     onToolSelected = { tool ->
                         when (tool.action) {
+                            DashboardToolAction.ImageToPdf -> {
+                                navController.navigate(AppDestination.ImageToPdf.route)
+                            }
+
                             DashboardToolAction.RecentFiles -> {
                                 navController.navigate(AppDestination.RecentFiles.route)
                             }
@@ -144,6 +150,14 @@ fun TechayanNavHost(
                             }
                         }
                     }
+                )
+            }
+
+            composable(AppDestination.ImageToPdf.route) {
+                val viewModel: ImageToPdfViewModel = viewModel()
+                ImageToPdfScreen(
+                    viewModel = viewModel,
+                    snackbarHostState = snackbarHostState
                 )
             }
 

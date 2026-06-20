@@ -9,6 +9,7 @@ sealed class AppDestination(
 ) {
     data object Splash : AppDestination("splash", "Techayan PDF Tools")
     data object Dashboard : AppDestination("dashboard", "Dashboard", R.drawable.ic_dashboard_24)
+    data object ImageToPdf : AppDestination("image_to_pdf", "Image to PDF")
     data object RecentFiles : AppDestination("recent_files", "Recent Files")
     data object Settings : AppDestination("settings", "Settings", R.drawable.ic_settings_24)
     data object About : AppDestination("about", "About Us", R.drawable.ic_info_24)
@@ -17,7 +18,7 @@ sealed class AppDestination(
 
     companion object {
         val bottomNavItems = listOf(Dashboard, Settings, About)
-        val all = listOf(Splash, Dashboard, RecentFiles, Settings, About, PrivacyPolicy, TermsConditions)
+        val all = listOf(Splash, Dashboard, ImageToPdf, RecentFiles, Settings, About, PrivacyPolicy, TermsConditions)
 
         fun fromRoute(route: String?): AppDestination {
             return all.firstOrNull { it.route == route } ?: Dashboard
