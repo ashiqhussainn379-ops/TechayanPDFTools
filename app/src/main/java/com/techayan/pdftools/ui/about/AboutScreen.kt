@@ -64,6 +64,13 @@ fun AboutScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
+                    text = "Version 1.0",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
                     text = "A modern PDF utility foundation built with Kotlin, Jetpack Compose, Material 3, MVVM, and Navigation Compose.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onPrimaryContainer

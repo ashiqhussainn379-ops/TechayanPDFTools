@@ -8,13 +8,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -27,15 +23,14 @@ import com.techayan.pdftools.ui.about.AboutScreen
 import com.techayan.pdftools.ui.dashboard.DashboardScreen
 import com.techayan.pdftools.ui.dashboard.DashboardToolAction
 import com.techayan.pdftools.ui.dashboard.DashboardViewModel
-import com.techayan.pdftools.ui.imagetopdf.ImageToPdfScreen
-import com.techayan.pdftools.ui.imagetopdf.ImageToPdfViewModel
+import com.techayan.pdftools.ui.features.FeatureDestination
+import com.techayan.pdftools.ui.features.FeatureEmptyStateScreen
 import com.techayan.pdftools.ui.legal.PrivacyPolicyScreen
 import com.techayan.pdftools.ui.legal.TermsConditionsScreen
 import com.techayan.pdftools.ui.recent.RecentFilesScreen
 import com.techayan.pdftools.ui.settings.SettingsScreen
 import com.techayan.pdftools.ui.settings.SettingsViewModel
 import com.techayan.pdftools.ui.splash.SplashScreen
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,8 +39,6 @@ fun TechayanNavHost(
     onDarkModeChanged: (Boolean) -> Unit
 ) {
     val navController = rememberNavController()
-    val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route ?: AppDestination.Splash.route
     val currentDestination = AppDestination.fromRoute(currentRoute)
@@ -95,9 +88,6 @@ fun TechayanNavHost(
                     }
                 }
             }
-        },
-        snackbarHost = {
-            SnackbarHost(hostState = snackbarHostState)
         }
     ) { innerPadding ->
         NavHost(
@@ -124,40 +114,50 @@ fun TechayanNavHost(
                 DashboardScreen(
                     viewModel = viewModel,
                     onToolSelected = { tool ->
-                        when (tool.action) {
-                            DashboardToolAction.ImageToPdf -> {
-                                navController.navigate(AppDestination.ImageToPdf.route)
-                            }
-
-                            DashboardToolAction.RecentFiles -> {
-                                navController.navigate(AppDestination.RecentFiles.route)
-                            }
-
-                            DashboardToolAction.Settings -> {
-                                navController.navigate(AppDestination.Settings.route)
-                            }
-
-                            DashboardToolAction.About -> {
-                                navController.navigate(AppDestination.About.route)
-                            }
-
-                            else -> {
-                                coroutineScope.launch {
-                                    snackbarHostState.showSnackbar(
-                                        message = "${tool.title} UI is ready; processing logic is not part of this step."
-                                    )
-                                }
-                            }
-                        }
+                        navController.navigate(destinationForAction(tool.action).route)
                     }
                 )
             }
 
             composable(AppDestination.ImageToPdf.route) {
-                val viewModel: ImageToPdfViewModel = viewModel()
-                ImageToPdfScreen(
-                    viewModel = viewModel,
-                    snackbarHostState = snackbarHostState
+                FeatureEmptyStateScreen(
+                    feature = FeatureDestination.fromAction(DashboardToolAction.ImageToPdf)
+                )
+            }
+
+            composable(AppDestination.PdfMerge.route) {
+                FeatureEmptyStateScreen(
+                    feature = FeatureDestination.fromAction(DashboardToolAction.PdfMerge)
+                )
+            }
+
+            composable(AppDestination.PdfSplit.route) {
+                FeatureEmptyStateScreen(
+                    feature = FeatureDestination.fromAction(DashboardToolAction.PdfSplit)
+                )
+            }
+
+            composable(AppDestination.PdfCompress.route) {
+                FeatureEmptyStateScreen(
+                    feature = FeatureDestination.fromAction(DashboardToolAction.PdfCompress)
+                )
+            }
+
+            composable(AppDestination.PdfViewer.route) {
+                FeatureEmptyStateScreen(
+                    feature = FeatureDestination.fromAction(DashboardToolAction.PdfViewer)
+                )
+            }
+
+            composable(AppDestination.PdfToImage.route) {
+                FeatureEmptyStateScreen(
+                    feature = FeatureDestination.fromAction(DashboardToolAction.PdfToImage)
+                )
+            }
+
+            composable(AppDestination.ImageCompressor.route) {
+                FeatureEmptyStateScreen(
+                    feature = FeatureDestination.fromAction(DashboardToolAction.ImageCompressor)
                 )
             }
 
@@ -199,5 +199,20 @@ fun TechayanNavHost(
                 TermsConditionsScreen()
             }
         }
+    }
+}
+
+private fun destinationForAction(action: DashboardToolAction): AppDestination {
+    return when (action) {
+        DashboardToolAction.ImageToPdf -> AppDestination.ImageToPdf
+        DashboardToolAction.PdfMerge -> AppDestination.PdfMerge
+        DashboardToolAction.PdfSplit -> AppDestination.PdfSplit
+        DashboardToolAction.PdfCompress -> AppDestination.PdfCompress
+        DashboardToolAction.PdfViewer -> AppDestination.PdfViewer
+        DashboardToolAction.PdfToImage -> AppDestination.PdfToImage
+        DashboardToolAction.ImageCompressor -> AppDestination.ImageCompressor
+        DashboardToolAction.RecentFiles -> AppDestination.RecentFiles
+        DashboardToolAction.Settings -> AppDestination.Settings
+        DashboardToolAction.About -> AppDestination.About
     }
 }
