@@ -1,7 +1,6 @@
 package com.techayan.pdftools.ui.imagetopdf
 
 import android.content.ContentResolver
-import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
@@ -22,6 +21,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -173,7 +173,14 @@ class ImageToPdfRepository(
     }
 
     private fun decodeBitmapForPdf(uri: Uri): Bitmap? {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        return decodeBitmapWithImageDecoder(uri)
+            ?: decodeBitmapWithFactory(uri = uri, maxSize = MAX_BITMAP_DIMENSION)
+    }
+
+    private fun decodeBitmapWithImageDecoder(uri: Uri): Bitmap? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
+
+        return runCatching {
             val source = ImageDecoder.createSource(context.contentResolver, uri)
             ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
                 val sampleSize = calculateSampleSize(
@@ -184,36 +191,45 @@ class ImageToPdfRepository(
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                 decoder.setTargetSampleSize(sampleSize)
             }
-        } else {
-            decodeBitmapWithFactory(context.contentResolver, uri, MAX_BITMAP_DIMENSION)
-        }
+        }.getOrNull()
     }
 
     private fun decodeBitmapWithFactory(
-        resolver: ContentResolver,
         uri: Uri,
         maxSize: Int
     ): Bitmap? {
-        val options = BitmapFactory.Options().apply {
-            inJustDecodeBounds = true
-        }
+        return runCatching {
+            val options = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
 
-        resolver.openInputStream(uri)?.use { inputStream ->
-            BitmapFactory.decodeStream(inputStream, null, options)
-        }
+            openInputStream(uri)?.use { inputStream ->
+                BitmapFactory.decodeStream(inputStream, null, options)
+            }
 
-        val sampleSize = calculateSampleSize(
-            width = options.outWidth,
-            height = options.outHeight,
-            maxSize = maxSize
-        )
+            if (options.outWidth <= 0 || options.outHeight <= 0) return null
 
-        val decodeOptions = BitmapFactory.Options().apply {
-            inSampleSize = sampleSize
-        }
+            val sampleSize = calculateSampleSize(
+                width = options.outWidth,
+                height = options.outHeight,
+                maxSize = maxSize
+            )
 
-        return resolver.openInputStream(uri)?.use { inputStream ->
-            BitmapFactory.decodeStream(inputStream, null, decodeOptions)
+            val decodeOptions = BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+            }
+
+            openInputStream(uri)?.use { inputStream ->
+                BitmapFactory.decodeStream(inputStream, null, decodeOptions)
+            }
+        }.getOrNull()
+    }
+
+    private fun openInputStream(uri: Uri): InputStream? {
+        return if (uri.scheme == ContentResolver.SCHEME_FILE) {
+            uri.path?.let(::File)?.inputStream()
+        } else {
+            context.contentResolver.openInputStream(uri)
         }
     }
 

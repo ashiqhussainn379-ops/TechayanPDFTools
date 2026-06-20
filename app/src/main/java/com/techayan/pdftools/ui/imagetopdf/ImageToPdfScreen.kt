@@ -2,6 +2,7 @@ package com.techayan.pdftools.ui.imagetopdf
 
 import android.Manifest
 import android.content.ActivityNotFoundException
+import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -60,6 +61,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.InputStream
 import kotlin.math.max
 
 @Composable
@@ -106,6 +109,7 @@ fun ImageToPdfScreen(
         item {
             SelectionActionsCard(
                 selectedCount = uiState.selectedImages.size,
+                isImporting = uiState.isImporting,
                 isGenerating = uiState.isGenerating,
                 onSelectImages = {
                     imagePickerLauncher.launch(SUPPORTED_IMAGE_MIME_TYPES)
@@ -121,6 +125,12 @@ fun ImageToPdfScreen(
         }
 
         if (uiState.isGenerating) {
+            item {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+        }
+
+        if (uiState.isImporting) {
             item {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
@@ -217,6 +227,7 @@ private fun ImageToPdfHeader() {
 @Composable
 private fun SelectionActionsCard(
     selectedCount: Int,
+    isImporting: Boolean,
     isGenerating: Boolean,
     onSelectImages: () -> Unit,
     onGeneratePdf: () -> Unit
@@ -255,14 +266,14 @@ private fun SelectionActionsCard(
             ) {
                 FilledTonalButton(
                     onClick = onSelectImages,
-                    enabled = !isGenerating,
+                    enabled = !isImporting && !isGenerating,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text(text = "Select Images")
+                    Text(text = if (isImporting) "Importing" else "Select Images")
                 }
                 Button(
                     onClick = onGeneratePdf,
-                    enabled = selectedCount > 0 && !isGenerating,
+                    enabled = selectedCount > 0 && !isImporting && !isGenerating,
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(text = if (isGenerating) "Generating" else "Generate PDF")
@@ -449,8 +460,17 @@ private fun decodeThumbnail(
     context: Context,
     uri: Uri
 ): Bitmap? {
+    return decodeThumbnailWithImageDecoder(context, uri)
+        ?: decodeThumbnailWithBitmapFactory(context, uri)
+}
+
+private fun decodeThumbnailWithImageDecoder(
+    context: Context,
+    uri: Uri
+): Bitmap? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
+
     return runCatching {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val source = ImageDecoder.createSource(context.contentResolver, uri)
             ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
                 val largestEdge = max(info.size.width, info.size.height).coerceAtLeast(1)
@@ -458,25 +478,44 @@ private fun decodeThumbnail(
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                 decoder.setTargetSampleSize(sampleSize)
             }
-        } else {
-            val options = BitmapFactory.Options().apply {
-                inJustDecodeBounds = true
-            }
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                BitmapFactory.decodeStream(inputStream, null, options)
-            }
+    }.getOrNull()
+}
 
-            val largestEdge = max(options.outWidth, options.outHeight).coerceAtLeast(1)
-            val sampleSize = (largestEdge / THUMBNAIL_MAX_SIZE).coerceAtLeast(1)
-            val decodeOptions = BitmapFactory.Options().apply {
-                inSampleSize = sampleSize
-            }
+private fun decodeThumbnailWithBitmapFactory(
+    context: Context,
+    uri: Uri
+): Bitmap? {
+    return runCatching {
+        val options = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        openThumbnailStream(context, uri)?.use { inputStream ->
+            BitmapFactory.decodeStream(inputStream, null, options)
+        }
 
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                BitmapFactory.decodeStream(inputStream, null, decodeOptions)
-            }
+        if (options.outWidth <= 0 || options.outHeight <= 0) return null
+
+        val largestEdge = max(options.outWidth, options.outHeight).coerceAtLeast(1)
+        val sampleSize = (largestEdge / THUMBNAIL_MAX_SIZE).coerceAtLeast(1)
+        val decodeOptions = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+        }
+
+        openThumbnailStream(context, uri)?.use { inputStream ->
+            BitmapFactory.decodeStream(inputStream, null, decodeOptions)
         }
     }.getOrNull()
+}
+
+private fun openThumbnailStream(
+    context: Context,
+    uri: Uri
+): InputStream? {
+    return if (uri.scheme == ContentResolver.SCHEME_FILE) {
+        uri.path?.let(::File)?.inputStream()
+    } else {
+        context.contentResolver.openInputStream(uri)
+    }
 }
 
 private fun needsLegacyStoragePermission(context: Context): Boolean {

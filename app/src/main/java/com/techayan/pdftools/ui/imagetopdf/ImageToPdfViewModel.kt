@@ -3,15 +3,20 @@ package com.techayan.pdftools.ui.imagetopdf
 import android.app.Application
 import android.content.Intent
 import android.database.Cursor
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 
 class ImageToPdfViewModel(
     application: Application
@@ -19,6 +24,7 @@ class ImageToPdfViewModel(
 
     private val repository = ImageToPdfRepository(application.applicationContext)
     private val contentResolver = application.contentResolver
+    private val cacheDirectory = File(application.cacheDir, SELECTED_IMAGE_CACHE_DIRECTORY)
 
     private val _uiState = MutableStateFlow(ImageToPdfUiState())
     val uiState: StateFlow<ImageToPdfUiState> = _uiState.asStateFlow()
@@ -28,39 +34,39 @@ class ImageToPdfViewModel(
     fun addImages(uris: List<Uri>) {
         if (uris.isEmpty()) return
 
-        val currentUris = _uiState.value.selectedImages.map { it.uri }.toSet()
-        val acceptedImages = mutableListOf<SelectedImage>()
-        val rejectedNames = mutableListOf<String>()
-
-        uris.distinct().forEach { uri ->
-            if (uri in currentUris) return@forEach
-
-            persistReadPermission(uri)
-
-            val metadata = readImageMetadata(uri)
-            if (metadata == null) {
-                rejectedNames += uri.lastPathSegment ?: "Unknown file"
-            } else {
-                acceptedImages += SelectedImage(
-                    id = nextImageId++,
-                    uri = uri,
-                    name = metadata.name,
-                    mimeType = metadata.mimeType
-                )
-            }
+        val currentSourceUris = _uiState.value.selectedImages.map { it.sourceUri }.toSet()
+        val newUris = uris.distinct().filterNot { it in currentSourceUris }
+        if (newUris.isEmpty()) {
+            _uiState.update { it.copy(statusMessage = "Those images are already selected.") }
+            return
         }
 
-        _uiState.update { state ->
-            state.copy(
-                selectedImages = state.selectedImages + acceptedImages,
-                generatedPdf = null,
-                errorMessage = rejectedNames.takeIf { it.isNotEmpty() }?.let {
-                    "Unsupported image skipped: ${it.joinToString()}. Use JPG, JPEG, PNG, or WEBP."
-                },
-                statusMessage = acceptedImages.takeIf { it.isNotEmpty() }?.let {
-                    "${it.size} image${if (it.size == 1) "" else "s"} added."
-                }
+        _uiState.update {
+            it.copy(
+                isImporting = true,
+                errorMessage = null,
+                statusMessage = null
             )
+        }
+
+        viewModelScope.launch {
+            val importResult = withContext(Dispatchers.IO) {
+                importImages(newUris)
+            }
+
+            _uiState.update { state ->
+                state.copy(
+                    selectedImages = state.selectedImages + importResult.acceptedImages,
+                    isImporting = false,
+                    generatedPdf = null,
+                    errorMessage = importResult.rejectedItems.takeIf { it.isNotEmpty() }?.let {
+                        "Skipped ${it.size} image${if (it.size == 1) "" else "s"}: ${it.joinToString()}."
+                    },
+                    statusMessage = importResult.acceptedImages.takeIf { it.isNotEmpty() }?.let {
+                        "${it.size} image${if (it.size == 1) "" else "s"} added."
+                    }
+                )
+            }
         }
     }
 
@@ -74,6 +80,7 @@ class ImageToPdfViewModel(
 
     fun removeImage(imageId: Long) {
         _uiState.update { state ->
+            state.selectedImages.firstOrNull { it.id == imageId }?.let(::deleteCachedImage)
             state.copy(
                 selectedImages = state.selectedImages.filterNot { it.id == imageId },
                 generatedPdf = null,
@@ -115,7 +122,7 @@ class ImageToPdfViewModel(
                 _uiState.update {
                     it.copy(
                         isGenerating = false,
-                        errorMessage = throwable.message ?: "Unable to generate PDF. Please try again."
+                        errorMessage = throwable.message ?: "Unable to generate PDF. Please select the images again and retry."
                     )
                 }
             }
@@ -129,6 +136,87 @@ class ImageToPdfViewModel(
     fun clearMessages() {
         _uiState.update {
             it.copy(errorMessage = null, statusMessage = null)
+        }
+    }
+
+    private fun importImages(uris: List<Uri>): ImportResult {
+        val acceptedImages = mutableListOf<SelectedImage>()
+        val rejectedItems = mutableListOf<String>()
+
+        if (!cacheDirectory.exists()) {
+            cacheDirectory.mkdirs()
+        }
+
+        uris.forEach { uri ->
+            persistReadPermission(uri)
+
+            val metadata = readImageMetadata(uri)
+            if (metadata == null) {
+                rejectedItems += "${uri.lastPathSegment ?: "Unknown file"} is not JPG, JPEG, PNG, or WEBP"
+                return@forEach
+            }
+
+            val imageId = nextImageId++
+            val cachedFile = File(cacheDirectory, "selected_${imageId}.${metadata.extension}")
+
+            val importedImage = runCatching {
+                copyUriToFile(uri = uri, destination = cachedFile)
+                if (!isReadableImage(cachedFile)) {
+                    cachedFile.delete()
+                    error("Unable to read selected image")
+                }
+
+                SelectedImage(
+                    id = imageId,
+                    sourceUri = uri,
+                    uri = Uri.fromFile(cachedFile),
+                    name = metadata.name,
+                    mimeType = metadata.mimeType
+                )
+            }.getOrElse {
+                cachedFile.delete()
+                rejectedItems += "${metadata.name} could not be read"
+                null
+            }
+
+            importedImage?.let(acceptedImages::add)
+        }
+
+        return ImportResult(
+            acceptedImages = acceptedImages,
+            rejectedItems = rejectedItems
+        )
+    }
+
+    private fun copyUriToFile(
+        uri: Uri,
+        destination: File
+    ) {
+        contentResolver.openInputStream(uri)?.use { inputStream ->
+            FileOutputStream(destination).use { outputStream ->
+                inputStream.copyTo(outputStream)
+            }
+        } ?: error("Unable to read selected image")
+    }
+
+    private fun isReadableImage(file: File): Boolean {
+        val options = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+
+        return runCatching {
+            file.inputStream().use { inputStream ->
+                BitmapFactory.decodeStream(inputStream, null, options)
+            }
+            options.outWidth > 0 && options.outHeight > 0
+        }.getOrDefault(false)
+    }
+
+    private fun deleteCachedImage(image: SelectedImage) {
+        if (image.uri.scheme == "file") {
+            runCatching {
+                image.uri.path?.let(::File)?.delete()
+            }
         }
     }
 
@@ -167,12 +255,13 @@ class ImageToPdfViewModel(
     private fun readImageMetadata(uri: Uri): ImageMetadata? {
         val resolverMimeType = contentResolver.getType(uri)
         val displayName = queryDisplayName(uri) ?: "Image ${nextImageId + 1}"
-        val normalizedMimeType = normalizeMimeType(resolverMimeType, displayName)
+        val normalizedMimeType = normalizeMimeType(resolverMimeType, displayName) ?: return null
 
         return if (normalizedMimeType in SUPPORTED_MIME_TYPES) {
             ImageMetadata(
                 name = displayName,
-                mimeType = normalizedMimeType
+                mimeType = normalizedMimeType,
+                extension = extensionForMimeType(normalizedMimeType)
             )
         } else {
             null
@@ -195,24 +284,42 @@ class ImageToPdfViewModel(
     private fun normalizeMimeType(
         mimeType: String?,
         displayName: String
-    ): String {
+    ): String? {
         val lowerMime = mimeType?.lowercase()
-        if (lowerMime in SUPPORTED_MIME_TYPES) return lowerMime.orEmpty()
+        if (lowerMime == "image/jpg") return "image/jpeg"
+        if (lowerMime in SUPPORTED_MIME_TYPES) return lowerMime
 
         return when (displayName.substringAfterLast('.', "").lowercase()) {
             "jpg", "jpeg" -> "image/jpeg"
             "png" -> "image/png"
             "webp" -> "image/webp"
-            else -> lowerMime.orEmpty()
+            else -> null
+        }
+    }
+
+    private fun extensionForMimeType(mimeType: String): String {
+        return when (mimeType) {
+            "image/jpeg" -> "jpg"
+            "image/png" -> "png"
+            "image/webp" -> "webp"
+            else -> "img"
         }
     }
 
     private data class ImageMetadata(
         val name: String,
-        val mimeType: String
+        val mimeType: String,
+        val extension: String
+    )
+
+    private data class ImportResult(
+        val acceptedImages: List<SelectedImage>,
+        val rejectedItems: List<String>
     )
 
     companion object {
+        private const val SELECTED_IMAGE_CACHE_DIRECTORY = "image_to_pdf_selected"
+
         val SUPPORTED_MIME_TYPES = setOf(
             "image/jpeg",
             "image/png",

@@ -4,6 +4,7 @@ import android.net.Uri
 
 data class SelectedImage(
     val id: Long,
+    val sourceUri: Uri,
     val uri: Uri,
     val name: String,
     val mimeType: String
@@ -17,6 +18,7 @@ data class GeneratedPdf(
 
 data class ImageToPdfUiState(
     val selectedImages: List<SelectedImage> = emptyList(),
+    val isImporting: Boolean = false,
     val isGenerating: Boolean = false,
     val generatedPdf: GeneratedPdf? = null,
     val errorMessage: String? = null,
