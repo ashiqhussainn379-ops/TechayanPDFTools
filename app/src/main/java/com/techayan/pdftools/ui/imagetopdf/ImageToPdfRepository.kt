@@ -116,7 +116,8 @@ class ImageToPdfRepository(
         images: List<SelectedImage>,
         outputStream: java.io.OutputStream
     ) {
-        PdfDocument().use { pdfDocument ->
+        val pdfDocument = PdfDocument()
+        try {
             images.forEachIndexed { index, image ->
                 val bitmap = decodeBitmapForPdf(image.uri)
                     ?: throw IOException("Unable to decode ${image.name}.")
@@ -142,6 +143,8 @@ class ImageToPdfRepository(
             }
 
             pdfDocument.writeTo(outputStream)
+        } finally {
+            pdfDocument.close()
         }
     }
 
