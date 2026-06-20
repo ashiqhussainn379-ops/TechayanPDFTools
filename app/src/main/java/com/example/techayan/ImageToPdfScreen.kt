@@ -1,6 +1,7 @@
 package com.techayan.pdfeditor
 
 import android.Manifest
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
@@ -63,6 +64,25 @@ fun ImageToPdfScreen() {
     var isCreating by remember { mutableStateOf(false) }
     var pendingCreateAfterPermission by remember { mutableStateOf(false) }
 
+    fun rememberSelectedImages(uris: List<Uri>, persistReadGrant: Boolean) {
+        if (uris.isEmpty()) return
+
+        if (persistReadGrant) {
+            uris.forEach { uri ->
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+            }
+        }
+
+        selectedImages = uris
+        createdPdf = null
+        Toast.makeText(context, "${uris.size} image selected", Toast.LENGTH_SHORT).show()
+    }
+
     fun createSelectedPdf() {
         if (selectedImages.isEmpty()) {
             Toast.makeText(context, "Please select image first", Toast.LENGTH_SHORT).show()
@@ -117,21 +137,13 @@ fun ImageToPdfScreen() {
     val legacyPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
-        if (uris.isNotEmpty()) {
-            selectedImages = uris
-            createdPdf = null
-            Toast.makeText(context, "${uris.size} image selected", Toast.LENGTH_SHORT).show()
-        }
+        rememberSelectedImages(uris, persistReadGrant = true)
     }
 
     val photoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 50)
     ) { uris ->
-        if (uris.isNotEmpty()) {
-            selectedImages = uris
-            createdPdf = null
-            Toast.makeText(context, "${uris.size} image selected", Toast.LENGTH_SHORT).show()
-        }
+        rememberSelectedImages(uris, persistReadGrant = false)
     }
 
     Scaffold(

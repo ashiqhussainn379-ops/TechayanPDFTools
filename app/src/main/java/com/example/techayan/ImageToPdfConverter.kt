@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
@@ -15,6 +16,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.annotation.RequiresApi
 import androidx.core.content.FileProvider
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
@@ -134,29 +136,136 @@ object ImageToPdfConverter {
     }
 
     private fun loadImage(resolver: ContentResolver, uri: Uri): Bitmap {
-        val bounds = BitmapFactory.Options().apply {
-            inJustDecodeBounds = true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            decodeWithImageDecoder(resolver, uri)?.let { return it }
         }
 
-        resolver.openInputStream(uri)?.use { input ->
-            BitmapFactory.decodeStream(input, null, bounds)
-        } ?: error("Unable to read selected image")
+        val bounds = readImageBounds(resolver, uri)
+        val decoded = decodeWithBitmapFactory(resolver, uri, bounds.outWidth, bounds.outHeight)
+            ?: error("Unable to decode selected image. Please select the image again.")
 
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+        return rotateBitmapIfRequired(resolver, uri, decoded)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.P)
+    private fun decodeWithImageDecoder(resolver: ContentResolver, uri: Uri): Bitmap? {
+        return runCatching {
+            val source = ImageDecoder.createSource(resolver, uri)
+            ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                decoder.setTargetSampleSize(
+                    calculateSampleSize(info.size.width, info.size.height)
+                )
+            }
+        }.getOrNull()
+    }
+
+    private fun readImageBounds(resolver: ContentResolver, uri: Uri): BitmapFactory.Options {
+        val fileDescriptorBounds = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        val readFileDescriptor = decodeFileDescriptor(
+            resolver = resolver,
+            uri = uri,
+            options = fileDescriptorBounds
+        )
+        if (readFileDescriptor && fileDescriptorBounds.hasValidSize()) {
+            return fileDescriptorBounds
+        }
+
+        val streamBounds = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        val readStream = decodeStream(
+            resolver = resolver,
+            uri = uri,
+            options = streamBounds
+        )
+        if (readStream && streamBounds.hasValidSize()) {
+            return streamBounds
+        }
+
+        if (readFileDescriptor || readStream) {
             error("Selected file is not a valid image")
         }
 
-        val options = BitmapFactory.Options().apply {
+        error("Unable to read selected image. Please select the image again.")
+    }
+
+    private fun BitmapFactory.Options.hasValidSize(): Boolean {
+        return outWidth > 0 && outHeight > 0
+    }
+
+    private fun decodeWithBitmapFactory(
+        resolver: ContentResolver,
+        uri: Uri,
+        width: Int,
+        height: Int
+    ): Bitmap? {
+        val sampleSize = calculateSampleSize(width, height)
+
+        return decodeBitmapFromFileDescriptor(resolver, uri, sampleSize)
+            ?: decodeBitmapFromStream(resolver, uri, sampleSize)
+    }
+
+    private fun decodeBitmapFromFileDescriptor(
+        resolver: ContentResolver,
+        uri: Uri,
+        sampleSize: Int
+    ): Bitmap? {
+        val options = createDecodeOptions(sampleSize)
+        return runCatching {
+            resolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+                BitmapFactory.decodeFileDescriptor(descriptor.fileDescriptor, null, options)
+            }
+        }.getOrNull()
+    }
+
+    private fun decodeBitmapFromStream(
+        resolver: ContentResolver,
+        uri: Uri,
+        sampleSize: Int
+    ): Bitmap? {
+        val options = createDecodeOptions(sampleSize)
+        return runCatching {
+            resolver.openInputStream(uri)?.use { input ->
+                BitmapFactory.decodeStream(input, null, options)
+            }
+        }.getOrNull()
+    }
+
+    private fun createDecodeOptions(sampleSize: Int): BitmapFactory.Options {
+        return BitmapFactory.Options().apply {
             inJustDecodeBounds = false
-            inSampleSize = calculateSampleSize(bounds.outWidth, bounds.outHeight)
+            inSampleSize = sampleSize
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
+    }
 
-        val decoded = resolver.openInputStream(uri)?.use { input ->
-            BitmapFactory.decodeStream(input, null, options)
-        } ?: error("Unable to decode selected image")
+    private fun decodeFileDescriptor(
+        resolver: ContentResolver,
+        uri: Uri,
+        options: BitmapFactory.Options
+    ): Boolean {
+        return runCatching {
+            resolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+                BitmapFactory.decodeFileDescriptor(descriptor.fileDescriptor, null, options)
+                true
+            } ?: false
+        }.getOrDefault(false)
+    }
 
-        return rotateBitmapIfRequired(resolver, uri, decoded)
+    private fun decodeStream(
+        resolver: ContentResolver,
+        uri: Uri,
+        options: BitmapFactory.Options
+    ): Boolean {
+        return runCatching {
+            resolver.openInputStream(uri)?.use { input ->
+                BitmapFactory.decodeStream(input, null, options)
+                true
+            } ?: false
+        }.getOrDefault(false)
     }
 
     private fun calculateSampleSize(width: Int, height: Int): Int {
@@ -178,12 +287,14 @@ object ImageToPdfConverter {
         uri: Uri,
         bitmap: Bitmap
     ): Bitmap {
-        val orientation = resolver.openInputStream(uri)?.use { input ->
-            ExifInterface(input).getAttributeInt(
-                ExifInterface.TAG_ORIENTATION,
-                ExifInterface.ORIENTATION_NORMAL
-            )
-        } ?: ExifInterface.ORIENTATION_NORMAL
+        val orientation = runCatching {
+            resolver.openInputStream(uri)?.use { input ->
+                ExifInterface(input).getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL
+                )
+            } ?: ExifInterface.ORIENTATION_NORMAL
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
 
         val degrees = when (orientation) {
             ExifInterface.ORIENTATION_ROTATE_90 -> 90f
