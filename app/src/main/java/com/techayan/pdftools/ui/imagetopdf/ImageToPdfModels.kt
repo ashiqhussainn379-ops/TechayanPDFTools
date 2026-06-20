@@ -6,6 +6,7 @@ data class SelectedImage(
     val id: Long,
     val sourceUri: Uri,
     val localUri: Uri,
+    val localPath: String,
     val displayName: String,
     val mimeType: String
 )
@@ -13,7 +14,8 @@ data class SelectedImage(
 data class GeneratedPdf(
     val uri: Uri,
     val fileName: String,
-    val savedLocation: String
+    val savedLocation: String,
+    val skippedImages: List<String> = emptyList()
 )
 
 data class ImageToPdfUiState(

@@ -1,17 +1,18 @@
 package com.techayan.pdftools.ui.imagetopdf
 
 import android.content.ClipData
-import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ImageDecoder
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.pdf.PdfDocument
-import android.net.Uri
+import android.media.ExifInterface
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -21,7 +22,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.io.InputStream
 import kotlin.math.max
 import kotlin.math.min
 
@@ -83,7 +83,7 @@ class ImageToPdfRepository(
             ?: throw IOException("Unable to create a PDF in Documents/$OUTPUT_DIRECTORY.")
 
         try {
-            resolver.openOutputStream(outputUri)?.use { outputStream ->
+            val skippedImages = resolver.openOutputStream(outputUri)?.use { outputStream ->
                 writePdf(images = images, outputStream = outputStream)
             } ?: throw IOException("Unable to open the PDF output stream.")
 
@@ -94,7 +94,8 @@ class ImageToPdfRepository(
             return GeneratedPdf(
                 uri = outputUri,
                 fileName = fileName,
-                savedLocation = "Documents/$OUTPUT_DIRECTORY/$fileName"
+                savedLocation = "Documents/$OUTPUT_DIRECTORY/$fileName",
+                skippedImages = skippedImages
             )
         } catch (exception: Exception) {
             resolver.delete(outputUri, null, null)
@@ -115,7 +116,7 @@ class ImageToPdfRepository(
         }
 
         val outputFile = File(outputDirectory, fileName)
-        FileOutputStream(outputFile).use { outputStream ->
+        val skippedImages = FileOutputStream(outputFile).use { outputStream ->
             writePdf(images = images, outputStream = outputStream)
         }
 
@@ -126,26 +127,34 @@ class ImageToPdfRepository(
                 outputFile
             ),
             fileName = fileName,
-            savedLocation = "App Documents/$OUTPUT_DIRECTORY/$fileName"
+            savedLocation = "App Documents/$OUTPUT_DIRECTORY/$fileName",
+            skippedImages = skippedImages
         )
     }
 
     private fun writePdf(
         images: List<SelectedImage>,
         outputStream: java.io.OutputStream
-    ) {
+    ): List<String> {
         val pdfDocument = PdfDocument()
+        val skippedImages = mutableListOf<String>()
+        var pageNumber = 1
+
         try {
-            images.forEachIndexed { index, image ->
-                val bitmap = decodeBitmap(image.localUri)
-                    ?: throw IOException("Unable to read ${image.displayName}. Please remove it and select it again.")
+            images.forEach { image ->
+                val imageFile = File(image.localPath)
+                val bitmap = decodeBitmap(imageFile)
+                if (bitmap == null) {
+                    skippedImages += image.displayName
+                    return@forEach
+                }
 
                 try {
                     val pageSize = pageSizeFor(bitmap)
                     val pageInfo = PdfDocument.PageInfo.Builder(
                         pageSize.width,
                         pageSize.height,
-                        index + 1
+                        pageNumber
                     ).create()
                     val page = pdfDocument.startPage(pageInfo)
 
@@ -157,12 +166,18 @@ class ImageToPdfRepository(
                     )
 
                     pdfDocument.finishPage(page)
+                    pageNumber += 1
                 } finally {
                     bitmap.recycle()
                 }
             }
 
+            if (pageNumber == 1) {
+                throw IOException("No selected images could be decoded. Please choose the images again.")
+            }
+
             pdfDocument.writeTo(outputStream)
+            return skippedImages
         } finally {
             pdfDocument.close()
         }
@@ -200,49 +215,95 @@ class ImageToPdfRepository(
         canvas.drawBitmap(bitmap, null, destination, paint)
     }
 
-    fun decodeBitmap(uri: Uri): Bitmap? {
+    fun decodeBitmap(file: File): Bitmap? {
+        if (!file.exists() || file.length() <= 0L) return null
+
+        return decodeWithImageDecoder(file)
+            ?: decodeWithBitmapFactory(file)
+    }
+
+    fun canDecodeImage(file: File): Boolean {
+        val bitmap = decodeBitmap(file) ?: return false
+        bitmap.recycle()
+        return true
+    }
+
+    private fun decodeWithImageDecoder(file: File): Bitmap? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
+
         return runCatching {
-            val bounds = BitmapFactory.Options().apply {
-                inJustDecodeBounds = true
-            }
-            openInputStream(uri)?.use { inputStream ->
-                BitmapFactory.decodeStream(inputStream, null, bounds)
-            }
-
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-
-            val sampleSize = calculateSampleSize(
-                width = bounds.outWidth,
-                height = bounds.outHeight,
-                maxDimension = MAX_BITMAP_DIMENSION
-            )
-            val options = BitmapFactory.Options().apply {
-                inSampleSize = sampleSize
+            val source = ImageDecoder.createSource(file)
+            val decoded = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                decoder.setTargetSampleSize(
+                    calculateSampleSize(
+                        width = info.size.width,
+                        height = info.size.height,
+                        maxDimension = MAX_BITMAP_DIMENSION
+                    )
+                )
             }
 
-            openInputStream(uri)?.use { inputStream ->
-                BitmapFactory.decodeStream(inputStream, null, options)
-            }
+            applyExifOrientation(decoded, file)
         }.getOrNull()
     }
 
-    fun canDecodeImage(uri: Uri): Boolean {
+    private fun decodeWithBitmapFactory(file: File): Bitmap? {
         return runCatching {
             val bounds = BitmapFactory.Options().apply {
                 inJustDecodeBounds = true
             }
-            openInputStream(uri)?.use { inputStream ->
-                BitmapFactory.decodeStream(inputStream, null, bounds)
+            BitmapFactory.decodeFile(file.absolutePath, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+            val options = BitmapFactory.Options().apply {
+                inSampleSize = calculateSampleSize(
+                    width = bounds.outWidth,
+                    height = bounds.outHeight,
+                    maxDimension = MAX_BITMAP_DIMENSION
+                )
             }
-            bounds.outWidth > 0 && bounds.outHeight > 0
-        }.getOrDefault(false)
+
+            val decoded = BitmapFactory.decodeFile(file.absolutePath, options) ?: return null
+            applyExifOrientation(decoded, file)
+        }.getOrNull()
     }
 
-    private fun openInputStream(uri: Uri): InputStream? {
-        return if (uri.scheme == ContentResolver.SCHEME_FILE) {
-            uri.path?.let(::File)?.inputStream()
-        } else {
-            context.contentResolver.openInputStream(uri)
+    private fun applyExifOrientation(
+        bitmap: Bitmap,
+        file: File
+    ): Bitmap {
+        val orientation = runCatching {
+            ExifInterface(file.absolutePath).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL
+            )
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.setScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.setRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.setScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.setRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.setRotate(-90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setRotate(-90f)
+            else -> return bitmap
+        }
+
+        return runCatching {
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true).also {
+                if (it != bitmap) bitmap.recycle()
+            }
+        }.getOrElse {
+            bitmap
         }
     }
 

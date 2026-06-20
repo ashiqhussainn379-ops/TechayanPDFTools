@@ -14,9 +14,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
-import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -138,10 +139,16 @@ class ImageToPdfViewModel(
                 repository.createPdf(images = images, requestedName = pdfName)
             }.onSuccess { generatedPdf ->
                 _uiState.update {
+                    val skippedMessage = generatedPdf.skippedImages.takeIf { skipped -> skipped.isNotEmpty() }
+                        ?.joinToString(
+                            prefix = " Skipped unreadable image(s): ",
+                            separator = ", "
+                        ).orEmpty()
+
                     it.copy(
                         isCreatingPdf = false,
                         generatedPdf = generatedPdf,
-                        statusMessage = "PDF saved to ${generatedPdf.savedLocation}."
+                        statusMessage = "PDF saved to ${generatedPdf.savedLocation}.$skippedMessage"
                     )
                 }
             }.onFailure { throwable ->
@@ -211,30 +218,27 @@ class ImageToPdfViewModel(
                 "selected_${imageId}.${metadata.extension}"
             )
 
-            val importResult = runCatching {
-                copyUriToFile(sourceUri = sourceUri, destination = localFile)
-
-                val localUri = Uri.fromFile(localFile)
-                if (!repository.canDecodeImage(localUri)) {
-                    localFile.delete()
-                    throw IOException("Unable to decode ${metadata.displayName}.")
-                }
-
-                SelectedImage(
-                    id = imageId,
-                    sourceUri = sourceUri,
-                    localUri = localUri,
-                    displayName = metadata.displayName,
-                    mimeType = metadata.mimeType
-                )
-            }
-
-            importResult.onSuccess { selectedImage ->
-                acceptedImages += selectedImage
-            }.onFailure {
+            val copyResult = copyUriToFile(sourceUri = sourceUri, destination = localFile)
+            if (copyResult is CopyResult.Failure) {
                 localFile.delete()
-                rejectedMessages += "${metadata.displayName} could not be read. Please choose it again from the picker."
+                rejectedMessages += "${metadata.displayName}: ${copyResult.reason}"
+                return@forEach
             }
+
+            if (!repository.canDecodeImage(localFile)) {
+                localFile.delete()
+                rejectedMessages += "${metadata.displayName}: image data could not be decoded."
+                return@forEach
+            }
+
+            acceptedImages += SelectedImage(
+                id = imageId,
+                sourceUri = sourceUri,
+                localUri = Uri.fromFile(localFile),
+                localPath = localFile.absolutePath,
+                displayName = metadata.displayName,
+                mimeType = metadata.mimeType
+            )
         }
 
         return ImportResult(
@@ -246,12 +250,32 @@ class ImageToPdfViewModel(
     private fun copyUriToFile(
         sourceUri: Uri,
         destination: File
-    ) {
-        contentResolver.openInputStream(sourceUri)?.use { inputStream ->
-            FileOutputStream(destination).use { outputStream ->
-                inputStream.copyTo(outputStream)
+    ): CopyResult {
+        return runCatching {
+            val inputStream = contentResolver.openInputStream(sourceUri)
+                ?: return CopyResult.Failure("provider returned no readable stream")
+
+            BufferedInputStream(inputStream).use { bufferedInput ->
+                BufferedOutputStream(FileOutputStream(destination)).use { bufferedOutput ->
+                    val buffer = ByteArray(COPY_BUFFER_SIZE)
+                    var totalBytes = 0L
+                    while (true) {
+                        val bytesRead = bufferedInput.read(buffer)
+                        if (bytesRead == -1) break
+                        bufferedOutput.write(buffer, 0, bytesRead)
+                        totalBytes += bytesRead
+                    }
+                    bufferedOutput.flush()
+
+                    if (totalBytes <= 0L) {
+                        return CopyResult.Failure("file is empty or unreadable")
+                    }
+                }
             }
-        } ?: throw IOException("Unable to read selected image.")
+            CopyResult.Success
+        }.getOrElse {
+            CopyResult.Failure("could not be copied from this app")
+        }
     }
 
     private fun persistReadPermission(uri: Uri) {
@@ -347,7 +371,7 @@ class ImageToPdfViewModel(
 
     private fun deleteLocalImage(image: SelectedImage) {
         runCatching {
-            image.localUri.path?.let(::File)?.delete()
+            File(image.localPath).delete()
         }
     }
 
@@ -362,8 +386,14 @@ class ImageToPdfViewModel(
         val rejectedMessages: List<String>
     )
 
+    private sealed interface CopyResult {
+        data object Success : CopyResult
+        data class Failure(val reason: String) : CopyResult
+    }
+
     companion object {
         private const val IMPORTED_IMAGES_DIRECTORY = "image_to_pdf_imports"
+        private const val COPY_BUFFER_SIZE = 64 * 1024
 
         private val SUPPORTED_MIME_TYPES = setOf(
             "image/jpeg",

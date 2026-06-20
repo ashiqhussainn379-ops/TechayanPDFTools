@@ -1,12 +1,14 @@
 package com.techayan.pdftools.ui.imagetopdf
 
 import android.content.ActivityNotFoundException
-import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.net.Uri
+import android.graphics.ImageDecoder
+import android.graphics.Matrix
+import android.media.ExifInterface
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -57,7 +59,6 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.InputStream
 import kotlin.math.max
 
 @Composable
@@ -452,7 +453,7 @@ private fun SelectedImageCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            ImageThumbnail(uri = image.localUri)
+            ImageThumbnail(localPath = image.localPath)
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "${index + 1}. ${image.displayName}",
@@ -491,8 +492,8 @@ private fun SelectedImageCard(
 }
 
 @Composable
-private fun ImageThumbnail(uri: Uri) {
-    val thumbnail by rememberImageThumbnail(uri)
+private fun ImageThumbnail(localPath: String) {
+    val thumbnail by rememberImageThumbnail(localPath)
 
     Box(
         modifier = Modifier
@@ -520,27 +521,41 @@ private fun ImageThumbnail(uri: Uri) {
 }
 
 @Composable
-private fun rememberImageThumbnail(uri: Uri): State<androidx.compose.ui.graphics.ImageBitmap?> {
-    val context = LocalContext.current
-
-    return produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, uri) {
+private fun rememberImageThumbnail(localPath: String): State<androidx.compose.ui.graphics.ImageBitmap?> {
+    return produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, localPath) {
         value = withContext(Dispatchers.IO) {
-            decodeThumbnail(context = context, uri = uri)?.asImageBitmap()
+            decodeThumbnail(File(localPath))?.asImageBitmap()
         }
     }
 }
 
-private fun decodeThumbnail(
-    context: Context,
-    uri: Uri
-): Bitmap? {
+private fun decodeThumbnail(file: File): Bitmap? {
+    if (!file.exists() || file.length() <= 0L) return null
+
+    return decodeThumbnailWithImageDecoder(file)
+        ?: decodeThumbnailWithBitmapFactory(file)
+}
+
+private fun decodeThumbnailWithImageDecoder(file: File): Bitmap? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
+
+    return runCatching {
+        val source = ImageDecoder.createSource(file)
+        val decoded = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+            val largestEdge = max(info.size.width, info.size.height).coerceAtLeast(1)
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            decoder.setTargetSampleSize((largestEdge / THUMBNAIL_MAX_SIZE).coerceAtLeast(1))
+        }
+        applyExifOrientation(decoded, file)
+    }.getOrNull()
+}
+
+private fun decodeThumbnailWithBitmapFactory(file: File): Bitmap? {
     return runCatching {
         val bounds = BitmapFactory.Options().apply {
             inJustDecodeBounds = true
         }
-        openThumbnailStream(context, uri)?.use { inputStream ->
-            BitmapFactory.decodeStream(inputStream, null, bounds)
-        }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
 
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
@@ -550,20 +565,46 @@ private fun decodeThumbnail(
             inSampleSize = sampleSize
         }
 
-        openThumbnailStream(context, uri)?.use { inputStream ->
-            BitmapFactory.decodeStream(inputStream, null, options)
-        }
+        val decoded = BitmapFactory.decodeFile(file.absolutePath, options) ?: return null
+        applyExifOrientation(decoded, file)
     }.getOrNull()
 }
 
-private fun openThumbnailStream(
-    context: Context,
-    uri: Uri
-): InputStream? {
-    return if (uri.scheme == ContentResolver.SCHEME_FILE) {
-        uri.path?.let(::File)?.inputStream()
-    } else {
-        context.contentResolver.openInputStream(uri)
+private fun applyExifOrientation(
+    bitmap: Bitmap,
+    file: File
+): Bitmap {
+    val orientation = runCatching {
+        ExifInterface(file.absolutePath).getAttributeInt(
+            ExifInterface.TAG_ORIENTATION,
+            ExifInterface.ORIENTATION_NORMAL
+        )
+    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+
+    val matrix = Matrix()
+    when (orientation) {
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.setScale(-1f, 1f)
+        ExifInterface.ORIENTATION_ROTATE_180 -> matrix.setRotate(180f)
+        ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.setScale(1f, -1f)
+        ExifInterface.ORIENTATION_TRANSPOSE -> {
+            matrix.setRotate(90f)
+            matrix.postScale(-1f, 1f)
+        }
+        ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setRotate(90f)
+        ExifInterface.ORIENTATION_TRANSVERSE -> {
+            matrix.setRotate(-90f)
+            matrix.postScale(-1f, 1f)
+        }
+        ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setRotate(-90f)
+        else -> return bitmap
+    }
+
+    return runCatching {
+        Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true).also {
+            if (it != bitmap) bitmap.recycle()
+        }
+    }.getOrElse {
+        bitmap
     }
 }
 
