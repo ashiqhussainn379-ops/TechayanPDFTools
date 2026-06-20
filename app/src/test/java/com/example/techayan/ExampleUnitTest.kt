@@ -1,4 +1,4 @@
-package com.example.techayan
+package com.techayan.pdftools
 
 import org.junit.Test
 

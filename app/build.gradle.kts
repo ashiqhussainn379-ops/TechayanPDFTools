@@ -5,16 +5,16 @@ plugins {
 }
 
 android {
-    namespace = "com.techayan.pdfeditor"
+    namespace = "com.techayan.pdftools"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.techayan.pdfeditor"
+        applicationId = "com.techayan.pdftools"
         minSdk = 24
         targetSdk = 36
 
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 1
+        versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -46,18 +46,17 @@ android {
 }
 dependencies {
 
-    implementation("com.itextpdf:itext7-core:7.2.5")
-    implementation("androidx.exifinterface:exifinterface:1.3.7")
-
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.navigation.compose)
 
+    implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
-    implementation("androidx.compose.material3:material3:1.3.1")
-    implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation(libs.androidx.compose.material3)
 
     testImplementation(libs.junit)
 
