@@ -8,9 +8,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -21,12 +25,15 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.techayan.pdftools.ui.about.AboutScreen
 import com.techayan.pdftools.ui.dashboard.DashboardScreen
+import com.techayan.pdftools.ui.dashboard.DashboardToolAction
 import com.techayan.pdftools.ui.dashboard.DashboardViewModel
 import com.techayan.pdftools.ui.legal.PrivacyPolicyScreen
 import com.techayan.pdftools.ui.legal.TermsConditionsScreen
+import com.techayan.pdftools.ui.recent.RecentFilesScreen
 import com.techayan.pdftools.ui.settings.SettingsScreen
 import com.techayan.pdftools.ui.settings.SettingsViewModel
 import com.techayan.pdftools.ui.splash.SplashScreen
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,6 +42,8 @@ fun TechayanNavHost(
     onDarkModeChanged: (Boolean) -> Unit
 ) {
     val navController = rememberNavController()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route ?: AppDestination.Splash.route
     val currentDestination = AppDestination.fromRoute(currentRoute)
@@ -84,6 +93,9 @@ fun TechayanNavHost(
                     }
                 }
             }
+        },
+        snackbarHost = {
+            SnackbarHost(hostState = snackbarHostState)
         }
     ) { innerPadding ->
         NavHost(
@@ -107,7 +119,36 @@ fun TechayanNavHost(
 
             composable(AppDestination.Dashboard.route) {
                 val viewModel: DashboardViewModel = viewModel()
-                DashboardScreen(viewModel = viewModel)
+                DashboardScreen(
+                    viewModel = viewModel,
+                    onToolSelected = { tool ->
+                        when (tool.action) {
+                            DashboardToolAction.RecentFiles -> {
+                                navController.navigate(AppDestination.RecentFiles.route)
+                            }
+
+                            DashboardToolAction.Settings -> {
+                                navController.navigate(AppDestination.Settings.route)
+                            }
+
+                            DashboardToolAction.About -> {
+                                navController.navigate(AppDestination.About.route)
+                            }
+
+                            else -> {
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        message = "${tool.title} UI is ready; processing logic is not part of this step."
+                                    )
+                                }
+                            }
+                        }
+                    }
+                )
+            }
+
+            composable(AppDestination.RecentFiles.route) {
+                RecentFilesScreen()
             }
 
             composable(AppDestination.Settings.route) {

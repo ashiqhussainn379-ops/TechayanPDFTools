@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "com.techayan.pdftools"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 36
 
         versionCode = 1

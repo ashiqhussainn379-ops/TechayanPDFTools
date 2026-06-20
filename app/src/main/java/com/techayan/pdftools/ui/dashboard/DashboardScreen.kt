@@ -1,6 +1,7 @@
 package com.techayan.pdftools.ui.dashboard
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -36,7 +38,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun DashboardScreen(viewModel: DashboardViewModel) {
+fun DashboardScreen(
+    viewModel: DashboardViewModel,
+    onToolSelected: (DashboardTool) -> Unit
+) {
     val uiState by viewModel.uiState.collectAsState()
 
     LazyVerticalGrid(
@@ -51,7 +56,10 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
         }
 
         items(uiState.tools) { tool ->
-            DashboardToolCard(tool = tool)
+            DashboardToolCard(
+                tool = tool,
+                onClick = { onToolSelected(tool) }
+            )
         }
     }
 }
@@ -85,16 +93,50 @@ private fun DashboardHeader() {
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Choose a tool from the dashboard. Feature workflows are intentionally left for the next phase.",
+                text = "Convert, organize, compress, and manage documents from a clean Material 3 dashboard.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            Spacer(modifier = Modifier.height(18.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                DashboardStat(label = "Tools", value = "10")
+                DashboardStat(label = "Theme", value = "M3")
+                DashboardStat(label = "Min SDK", value = "26")
+            }
+        }
+    }
+}
+
+@Composable
+private fun DashboardStat(
+    label: String,
+    value: String
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(18.dp)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
 }
 
 @Composable
-private fun DashboardToolCard(tool: DashboardTool) {
+private fun DashboardToolCard(
+    tool: DashboardTool,
+    onClick: () -> Unit
+) {
     ElevatedCard(
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp),
         colors = CardDefaults.elevatedCardColors(
@@ -103,6 +145,7 @@ private fun DashboardToolCard(tool: DashboardTool) {
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 184.dp)
+            .clickable(onClick = onClick)
     ) {
         Column(
             modifier = Modifier
@@ -126,16 +169,40 @@ private fun DashboardToolCard(tool: DashboardTool) {
                 )
             }
 
-            Surface(
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                shape = RoundedCornerShape(100)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = "Coming soon",
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                )
+                Surface(
+                    color = tool.accentColor.copy(alpha = 0.12f),
+                    contentColor = tool.accentColor,
+                    shape = RoundedCornerShape(100)
+                ) {
+                    Text(
+                        text = tool.category,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(18.dp)
+                            .height(2.dp)
+                            .clip(RoundedCornerShape(100))
+                            .background(tool.accentColor)
+                    )
+                    Text(
+                        text = ">",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }
