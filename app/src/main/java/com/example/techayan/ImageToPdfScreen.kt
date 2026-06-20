@@ -109,7 +109,7 @@ fun ImageToPdfScreen() {
 
                 Toast.makeText(
                     context,
-                    exception.toString(),
+                    exception.message ?: "Unable to create PDF. Please try again.",
                     Toast.LENGTH_LONG
                 ).show()
             } finally {
