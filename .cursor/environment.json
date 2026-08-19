@@ -1,0 +1,4 @@
+{
+  "name": "Techayan PDF Tools",
+  "install": "bash .cursor/install.sh"
+}
